@@ -14,6 +14,11 @@
 
     .PARAMETER PrinterHostAddress
     Specifies the IP address or FQDN that the printer can be found at.
+
+    .CHANGELOG
+    v1.0 - Initial release
+    v1.1 - Added check in detection script to look for the correct driver name. This is to allow upgrading or 
+            superseding existing printer installations in InTune.
 #>
 [CmdletBinding()]
 param (
@@ -55,10 +60,17 @@ Write-Host "Creating the powershell detection script"
 $sb = [System.Text.StringBuilder]::new()
 [void]$sb.Append( '$RegKey = "HKLM:\Software\Microsoft\Windows NT\CurrentVersion\Print\Printers\' )
 [void]$sb.AppendLine( "$PrinterName`"" )
+[void]$sb.Append( '$PrintDriverName = "')
+[void]$sb.AppendLine( "$DriverName`"")
 [void]$sb.AppendLine( '$Detected = Get-ItemProperty -Path $RegKey -ErrorAction SilentlyContinue' )
 [void]$sb.AppendLine( 'if ($null -ne $Detected) {' )
-[void]$sb.AppendLine( '    Write-Host "Printer Detected!"' )
-[void]$sb.AppendLine( '    Exit 0' )
+[void]$sb.AppendLine( '    if ($Detected."Printer Driver" -eq $PrintDriverName) {' )
+[void]$sb.AppendLine( '        Write-Host "Printer Detected!"' )
+[void]$sb.AppendLine( '        Exit 0' )
+[void]$sb.AppendLine( '    }else{' )
+[void]$sb.AppendLine( '        Write-Host "Printer Detected but Driver does not match!"' )
+[void]$sb.AppendLine( '        Exit 1' )
+[void]$sb.AppendLine( '    }' )
 [void]$sb.AppendLine( '}else{' )
 [void]$sb.AppendLine( '    Write-Host "Printer Not Detected!"' )
 [void]$sb.AppendLine( '    Exit 1' )
