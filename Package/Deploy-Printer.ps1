@@ -21,6 +21,12 @@
     If this switch is used, the script will remove the printer and the printer port from the system instead.
     Note that the Printer Driver is not removed the system, only the printer queue and printer port are removed.
 
+    .CHANGELOG
+    Date         Author          Description
+    ----         ------          ---------------------------
+    2024-08-26   Nathan Dennis   Initial version
+    2025-12-01   Nathan Dennis   Added function to install the publisher certificate for signed drivers.
+
 #>
 [CmdletBinding(DefaultParameterSetName = 'Install')]
 param (
@@ -155,6 +161,35 @@ function Install-PrinterDriver {
             Write-Log ("{0} inf files located in directory" -f $infFile.Count)
         }
 
+        #Get all the catalog files in the driver folder and install their publisher certificates
+        $catFiles = Get-ChildItem -Path $DriverPath -Filter *.cat
+
+        #For each catalog file found, extract the publisher certificate and add it to the trusted publishers store
+        if ($null -ne $catFiles) {
+            foreach ($catFile in $catFiles) {
+                Write-Log -Message "Installing publisher certificate from catalog file: $($catFile.FullName)"
+
+                try{
+                    $cert = Get-AuthenticodeSignature -FilePath $catFile.FullName
+
+                    if ($cert.SignerCertificate -ne $null) {
+                        Write-Log -Message "Importing certificate issued to $($cert.SignerCertificate.Subject) into Trusted Publishers store"
+
+                        $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("TrustedPublisher","LocalMachine")
+                        $store.Open("ReadWrite")
+                        $store.Add($cert.SignerCertificate)
+                        $store.Close()
+                    }else{
+                        Write-Log -Message "No signer certificate found in catalog file: $($catFile.FullName)" -Severity Warning
+                    }
+                }
+                catch{
+                    Write-Log -Message "Failed to import certificate from catalog file: $($catFile.FullName). Error: $($_.Exception.Message)" -Severity Error
+                }
+            }
+        }
+
+        #Install the driver using pnputil.exe
         pnputil.exe /add-Driver "$DriverPath/*.inf" /install | Out-Null
 
         if ($LASTEXITCODE -eq 0) {
@@ -164,7 +199,7 @@ function Install-PrinterDriver {
         }elseif ($LASTEXITCODE -eq 3010) {
             Write-Log -Message "Printer drivers installed successfully. System restart required" -Severity Warning
         } else {
-            throw [System.Exception]::New('pnputil.exe return code of $LASTEXITCODE was received while installing the driver')
+            throw [System.Exception]::New("pnputil.exe return code of $LASTEXITCODE was received while installing the driver")
         }
     }else{
         Write-Log "$DriverPath does not exist.`nDrivers for each architecture must be placed in a sub folder named x86, x64, arm64" -Severity Critical
